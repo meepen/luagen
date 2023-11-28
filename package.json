@@ -27,7 +27,7 @@
     "test": "npx c8 node --loader tsx run-tests.ts"
   },
   "peerDependencies": {
-    "@meepen/luaparse": "^1.0.7"
+    "@meepen/luaparse": "^1.0.9"
   },
   "devDependencies": {
     "@types/node": "^20.8.3",

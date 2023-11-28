@@ -1,7 +1,6 @@
 import { EventEmitter } from 'events';
 import {
   Arguments,
-  Chunk,
   Expression,
   ExpressionType,
   FunctionCallPrefixExpression,
@@ -15,15 +14,20 @@ import {
   FunctionCallPrefixExpressionType,
   ArgumentsType,
   NodeType,
+  Field,
+  FieldType,
 } from '@meepen/luaparse';
 
 export class SourceGenerator extends EventEmitter {
   constructor(
-    public chunk: Chunk,
+    public root: Node,
     public newLine = '\n',
     public tab = '  ',
   ) {
     super();
+    if (root.type !== NodeType.Chunk) {
+      this.indentLevel = 0;
+    }
   }
 
   private indentLevel = -1;
@@ -52,6 +56,8 @@ export class SourceGenerator extends EventEmitter {
         this.emitData('.');
         await this.from(node.member);
         break;
+      default:
+        throw new Error('not implemented');
     }
   }
 
@@ -62,8 +68,14 @@ export class SourceGenerator extends EventEmitter {
         await this.from(node.expressions);
         this.emitData(')');
         break;
+      case ArgumentsType.TableConstructor:
+        await this.from(node.table);
+        break;
+      case ArgumentsType.String:
+        await this.fromExpression(node.string);
+        break;
       default:
-        throw new Error(`not implemented: ${ArgumentsType[node.argumentsType]}`);
+        throw new Error('not implemented');
     }
   }
 
@@ -79,6 +91,8 @@ export class SourceGenerator extends EventEmitter {
         await this.from(node.name);
         await this.fromArguments(node.argument);
         break;
+      default:
+        throw new Error('not implemented');
     }
   }
 
@@ -95,6 +109,8 @@ export class SourceGenerator extends EventEmitter {
         await this.fromExpression(node.expression);
         this.emitData(')');
         break;
+      default:
+        throw new Error('not implemented');
     }
   }
 
@@ -102,7 +118,6 @@ export class SourceGenerator extends EventEmitter {
     switch (node.expressionType) {
       case ExpressionType.UnaryOperationExpression:
         this.emitData(node.operator);
-        this.emitData(' ');
         await this.fromExpression(node.expression);
         break;
       case ExpressionType.PrefixExpression:
@@ -145,12 +160,18 @@ export class SourceGenerator extends EventEmitter {
         this.emitData('{');
         this.indentLevel++;
         for (const field of node.fields) {
+          this.line();
           await this.from(field);
           this.emitData(',');
         }
         this.indentLevel--;
+        if (node.fields.length > 0) {
+          this.line();
+        }
         this.emitData('}');
         break;
+      default:
+        throw new Error('not implemented');
     }
   }
 
@@ -174,7 +195,6 @@ export class SourceGenerator extends EventEmitter {
           this.emitData('elseif ');
           await this.fromExpression(elseIf.condition);
           this.emitData(' then');
-          this.line();
           await this.from(elseIf.body);
         }
         if (node.elseBody) {
@@ -208,8 +228,11 @@ export class SourceGenerator extends EventEmitter {
         break;
 
       case StatementType.ReturnStatement:
-        this.emitData('return ');
-        await this.from(node.expressions);
+        this.emitData('return');
+        if (node.expressions.children.length > 0) {
+          this.emitData(' ');
+          await this.from(node.expressions);
+        }
         break;
 
       case StatementType.LocalVariableDeclaration:
@@ -234,8 +257,48 @@ export class SourceGenerator extends EventEmitter {
         this.emitData('end');
         break;
 
+      case StatementType.LocalFunctionDeclaration:
+        this.emitData('local function ');
+        await this.from(node.name);
+        await this.from(node.body);
+        this.line();
+        this.emitData('end');
+        break;
+
+      case StatementType.BreakStatement:
+        this.emitData('break');
+        break;
+
+      case StatementType.ForInBlockEnd:
+        this.emitData('for ');
+        await this.from(node.nameList);
+        this.emitData(' in ');
+        await this.from(node.expressionList);
+        this.emitData(' do');
+        await this.from(node.body);
+        this.line();
+        this.emitData('end');
+        break;
+
+      case StatementType.RepeatBlockEnd:
+        this.emitData('repeat');
+        await this.from(node.body);
+        this.line();
+        this.emitData('until ');
+        await this.fromExpression(node.condition);
+        break;
+
+      case StatementType.WhileBlockEnd:
+        this.emitData('while ');
+        await this.fromExpression(node.condition);
+        this.emitData(' do');
+        await this.from(node.body);
+        this.line();
+        this.emitData('end');
+        break;
+
       default:
-        throw new Error(`not implemented: ${StatementType[node.statementType]}`);
+        throw new Error('not implemented');
     }
   }
 
@@ -312,19 +375,66 @@ export class SourceGenerator extends EventEmitter {
         }
         break;
 
+      case NodeType.Expression:
+        await this.fromExpression(node);
+        break;
+
+      case NodeType.Statement:
+        await this.fromStatement(node);
+        break;
+
+      case NodeType.Arguments:
+        await this.fromArguments(node);
+        break;
+
+      case NodeType.Field:
+        await this.fromField(node);
+        break;
+
+      case NodeType.ElseIfClause:
+        this.emitData('elseif ');
+        await this.fromExpression(node.condition);
+        this.emitData(' then');
+        await this.from(node.body);
+        break;
+
       default:
-        throw new Error(`not implemented: ${NodeType[node.type]}`);
+        throw new Error('not implemented');
+    }
+  }
+
+  private async fromField(node: Field) {
+    switch (node.fieldType) {
+      case FieldType.Expression:
+        await this.fromExpression(node.value);
+        break;
+
+      case FieldType.NameExpression:
+        await this.from(node.key);
+        this.emitData(' = ');
+        await this.fromExpression(node.value);
+        break;
+
+      case FieldType.ExpressionExpression:
+        this.emitData('[');
+        await this.fromExpression(node.key);
+        this.emitData('] = ');
+        await this.fromExpression(node.value);
+        break;
+
+      default:
+        throw new Error('not implemented');
     }
   }
 
   public async process() {
     this.emit('start');
     try {
-      await this.from(this.chunk);
+      await this.from(this.root);
+      this.emit('end');
     } catch (e) {
       this.emit('error', e);
     }
-    this.emit('end');
   }
 
   public async generate(): Promise<string> {
